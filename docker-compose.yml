@@ -1,0 +1,290 @@
+version: '3.8'
+
+services:
+  # ==================== Databases ====================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: speakup-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-speakup_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-speakup_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-speakup_admin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - speakup-network
+
+  mongodb:
+    image: mongo:7
+    container_name: speakup-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER:-speakup_admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-change_this_password}
+      MONGO_INITDB_DATABASE: ${MONGODB_DB:-speakup_ai}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - speakup-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: speakup-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-change_this_password}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - speakup-network
+
+  # ==================== Microservices ====================
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: speakup-api-gateway
+    ports:
+      - "${API_GATEWAY_PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3000
+      - POSTGRES_URL=${DATABASE_URL}
+      - MONGODB_URL=${MONGODB_URL}
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ASR_SERVICE_URL=http://asr-service:3001
+      - TTS_SERVICE_URL=http://tts-service:3002
+      - DIALOGUE_SERVICE_URL=http://dialogue-service:3003
+      - SCENARIOS_SERVICE_URL=http://scenarios-service:3004
+      - HISTORY_SERVICE_URL=http://history-service:3005
+      - RECOMMENDATIONS_SERVICE_URL=http://recommendations-service:3006
+      - I18N_SERVICE_URL=http://i18n-service:3007
+      - USER_SERVICE_URL=http://user-service:3008
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/api-gateway:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+  asr-service:
+    build:
+      context: ./services/asr-service
+      dockerfile: Dockerfile
+    container_name: speakup-asr-service
+    ports:
+      - "${ASR_SERVICE_PORT:-3001}:3001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3001
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL_FAST=${GEMINI_MODEL_FAST}
+      - GEMINI_MODEL_ADVANCED=${GEMINI_MODEL_ADVANCED}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE}
+      - AUDIO_ENCODING=${AUDIO_ENCODING}
+    volumes:
+      - ./services/asr-service:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+  tts-service:
+    build:
+      context: ./services/tts-service
+      dockerfile: Dockerfile
+    container_name: speakup-tts-service
+    ports:
+      - "${TTS_SERVICE_PORT:-3002}:3002"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3002
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL_AUDIO=${GEMINI_MODEL_AUDIO}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE}
+    volumes:
+      - ./services/tts-service:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+  dialogue-service:
+    build:
+      context: ./services/dialogue-service
+      dockerfile: Dockerfile
+    container_name: speakup-dialogue-service
+    ports:
+      - "${DIALOGUE_SERVICE_PORT:-3003}:3003"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3003
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL_FAST=${GEMINI_MODEL_FAST}
+      - GEMINI_MODEL_ADVANCED=${GEMINI_MODEL_ADVANCED}
+      - GEMINI_MODEL_AUDIO=${GEMINI_MODEL_AUDIO}
+      - MONGODB_URL=${MONGODB_URL}
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/dialogue-service:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+  scenarios-service:
+    build:
+      context: ./services/scenarios-service
+      dockerfile: Dockerfile
+    container_name: speakup-scenarios-service
+    ports:
+      - "${SCENARIOS_SERVICE_PORT:-3004}:3004"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3004
+      - MONGODB_URL=${MONGODB_URL}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./services/scenarios-service:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+  history-service:
+    build:
+      context: ./services/history-service
+      dockerfile: Dockerfile
+    container_name: speakup-history-service
+    ports:
+      - "${HISTORY_SERVICE_PORT:-3005}:3005"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3005
+      - MONGODB_URL=${MONGODB_URL}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./services/history-service:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+  recommendations-service:
+    build:
+      context: ./services/recommendations-service
+      dockerfile: Dockerfile
+    container_name: speakup-recommendations-service
+    ports:
+      - "${RECOMMENDATIONS_SERVICE_PORT:-3006}:3006"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3006
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL_ADVANCED=${GEMINI_MODEL_ADVANCED}
+      - MONGODB_URL=${MONGODB_URL}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ./services/recommendations-service:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+  i18n-service:
+    build:
+      context: ./services/i18n-service
+      dockerfile: Dockerfile
+    container_name: speakup-i18n-service
+    ports:
+      - "${I18N_SERVICE_PORT:-3007}:3007"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3007
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/i18n-service:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    container_name: speakup-user-service
+    ports:
+      - "${USER_SERVICE_PORT:-3008}:3008"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3008
+      - POSTGRES_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET=${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/user-service:/app
+      - /app/node_modules
+    networks:
+      - speakup-network
+    restart: unless-stopped
+
+networks:
+  speakup-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local

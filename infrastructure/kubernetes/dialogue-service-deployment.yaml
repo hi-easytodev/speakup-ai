@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dialogue-service
+  namespace: speakup-ai
+  labels:
+    app: dialogue-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dialogue-service
+  template:
+    metadata:
+      labels:
+        app: dialogue-service
+    spec:
+      containers:
+      - name: dialogue-service
+        image: speakup-ai/dialogue-service:latest
+        ports:
+        - containerPort: 3003
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3003"
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: speakup-secrets
+              key: gemini-api-key
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dialogue-service
+  namespace: speakup-ai
+spec:
+  selector:
+    app: dialogue-service
+  ports:
+  - protocol: TCP
+    port: 3003
+    targetPort: 3003

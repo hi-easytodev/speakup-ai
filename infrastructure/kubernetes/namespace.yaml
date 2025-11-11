@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: speakup-ai
+  labels:
+    name: speakup-ai
+    environment: production
